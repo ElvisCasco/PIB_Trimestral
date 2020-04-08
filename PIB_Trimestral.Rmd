@@ -1,0 +1,1399 @@
+---
+title: "BCH Webpage: PIB Trimestral"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    theme: spacelab
+    toc: yes
+  pdf_document:
+    toc: yes
+always_allow_html: yes
+---
+
+# Estad&#237;stica Econ&#243;mica
+
+## Sector Real
+
+### PIB Trimestral
+
+#### Portal Cuentas Nacionales Trimestrales de Honduras
+
+Los archivos `.csv` contenidos en la carpeta `CSVData` se obtuvieron por medio de consultas al [Portal Cuentas Nacionales Trimestrales de Honduras](https://see.bch.hn/portalPIBT/Login.aspx?ReturnUrl=%2fportalPIBT%2f), para lo cual debe crearse un [usuario](https://see.bch.hn/portalPIBT/PerfilSCNT.aspx) en caso de registrarse por primera vez.
+
+Con el fin de obtener todos los datos disponibles en el portal, se dividen las consultas en dos partes:
+
+##### Enfoque PIB: Producci&#243;n
+
+Al igresar al portal, se eligen los siguientes par&#225;metros en la vi&#241;eta "Series Hist&#243;ricas PIB Trimestral":
+
+- Enfoque PIB: "Producci&#243;n"
+
+- Actividad Econ&#243;mica: "Seleccionar todos los items", pulsando el bot&#243; "&#8595; &#8595;"
+
+- Tipo de Valoraci&#243;n: "Seleccionar todos los items", pulsando el bot&#243; "&#8595; &#8595;"
+
+- Tipos de Serie: "Seleccionar todos los items", pulsando el bot&#243; "&#8595; &#8595;"
+
+- Tipos de Variaci&#243;n: No seleccionar ning&#250;n item
+
+- Per&#237;odo a Consultar: A&#241;o inicial = 2000; A&#241;o final = &#250;ltimo a&#241;o disponible
+
+Posteriormente, se solicita la descarga de la consulta en archivo de Excel, pulsando el bot&#243;n "Descargar reporte". El resultado (archivo de Excel "ReportesDinamicosPIBProduccion.xls") se guarda en la carpeta "XLSData".
+
+###### Valores Corrientes
+
+```{r, comment="", warning=F, message=F, echo=T} 
+rm(list = ls())
+library(plotly)
+library(readxl)
+library(tidyverse)
+
+## Parametros de fecha
+fecha_fin <- "2019/12/2" # Debe cambiarse la fecha de acuerdo a datos disponibles
+
+## Tidy Data
+PIBProduccion_Corrientes <- readxl::read_excel("XLSData/ReportesDinamicosPIBProduccion.xls",
+                            sheet = "VALORES CORRIENTES",
+                            skip = 10) %>%
+  stats::na.omit() %>%
+  dplyr::mutate(N = 1:34,
+         Tipo_Serie = case_when(N %in% 1:17 ~ "Original",
+                                    N %in% 18:34 ~ "Desestacionalizada"),
+         Enfoque_PIB = "Producci\u00F3n")  %>%
+  dplyr::rename(Nombre_Serie = 1) %>%
+  dplyr::select(N,Nombre_Serie,Tipo_Serie,Enfoque_PIB,everything()) %>%
+  dplyr::select(-starts_with("..."))
+quarters <- c("N","Nombre_Serie","Tipo_Serie","Enfoque_PIB",
+              as.character(as.POSIXct(seq(as.Date("2000/3/2"),
+                                          as.Date(fecha_fin),
+                                          by = "quarter"))))
+names(PIBProduccion_Corrientes) <- quarters
+PIBProduccion_Corrientes <- PIBProduccion_Corrientes %>%
+  tidyr::gather("Fecha","Valor",5:ncol(.)) %>%
+  dplyr::mutate(Valor = as.double(Valor),
+         Fecha = as.Date(Fecha),
+         Tipo_Valor = "Corrientes") %>%
+  dplyr::select(N,Enfoque_PIB,Tipo_Serie,Tipo_Valor,Nombre_Serie,Fecha,Valor)
+```
+
+###### Valores Constantes
+
+```{r, comment="", warning=F, message=F, echo=T} 
+# rm(list = ls())
+
+## Tidy Data
+PIBProduccion_Constantes <- readxl::read_excel("XLSData/ReportesDinamicosPIBProduccion.xls",
+                            sheet = "VALORES CONSTANTES",
+                            skip = 10) %>%
+  stats::na.omit() %>%
+  # filter(CONCEPTO != "CONCEPTO") %>%
+  dplyr::mutate(N = 1:34,
+         Tipo_Serie = case_when(N %in% 1:17 ~ "Original",
+                                    N %in% 18:34 ~ "Desestacionalizada"),
+         Enfoque_PIB = "Producci\u00F3n")  %>%
+  dplyr::rename(Nombre_Serie = 1) %>%
+  dplyr::select(N,Nombre_Serie,Tipo_Serie,Enfoque_PIB,everything()) %>%
+  dplyr::select(-starts_with("..."))
+quarters <- c("N","Nombre_Serie","Tipo_Serie","Enfoque_PIB",
+              as.character(as.POSIXct(seq(as.Date("2000/3/2"),
+                                          as.Date(fecha_fin),
+                                          by = "quarter"))))
+names(PIBProduccion_Constantes) <- quarters
+PIBProduccion_Constantes <- PIBProduccion_Constantes %>%
+  tidyr::gather("Fecha","Valor",5:ncol(.)) %>%
+  dplyr::mutate(Valor = as.double(Valor),
+         Fecha = as.Date(Fecha),
+         Tipo_Valor = "Constantes") %>%
+  dplyr::select(N,Enfoque_PIB,Tipo_Serie,Tipo_Valor,Nombre_Serie,Fecha,Valor)
+```
+
+###### Serie Tendencia-Ciclo
+
+```{r, comment="", warning=F, message=F, echo=T} 
+# rm(list = ls())
+
+## Tidy Data
+PIBProduccion_Tendencia_Ciclo <- readxl::read_excel("XLSData/ReportesDinamicosPIBProduccion.xls",
+                            sheet = "SERIE TENDENCIA CICLO",
+                            skip = 8) %>%
+  stats::na.omit() %>%
+  dplyr::mutate(N = 1:nrow(.),
+         Tipo_Serie = "Tendencia_Ciclo",
+         Enfoque_PIB = "Producci\u00F3n",
+         Nombre_Serie = "Tendencia_Ciclo",
+         Tipo_Valor = "Tendencia_Ciclo",
+         Fecha = seq(as.Date("2000/3/2"),
+                     as.Date(fecha_fin),
+                     by = "quarter"))  %>%
+  dplyr::rename(Valor = `Serie Tendencia Ciclo`) %>%
+  dplyr::select(N,Nombre_Serie,Tipo_Serie,Enfoque_PIB,everything()) %>%
+  dplyr::select(-c(5,6))
+PIBProduccion_Tendencia_Ciclo <- PIBProduccion_Tendencia_Ciclo %>%
+  dplyr::select(N,Enfoque_PIB,Tipo_Serie,Tipo_Valor,Nombre_Serie,Fecha,Valor)
+```
+
+##### Enfoque PIB: Gasto
+
+Al igresar al portal, se eligen los siguientes par&#225;metros en la vi&#241;eta "Series Hist&#243;ricas PIB Trimestral":
+
+- Enfoque PIB: "Gasto"
+
+- Componentes: "Seleccionar todos los items", pulsando el bot&#243; "&#8595; &#8595;"
+
+- Tipo de Valoraci&#243;n: "Seleccionar todos los items", pulsando el bot&#243; "&#8595; &#8595;"
+
+- Tipos de Serie: "Seleccionar todos los items", pulsando el bot&#243; "&#8595; &#8595;"
+
+- Tipos de Variaci&#243;n: No seleccionar ning&#250;n item
+
+- Per&#237;odo a Consultar: A&#241;o inicial = 2000; A&#241;o final = &#250;ltimo a&#241;o disponible
+
+Posteriormente, se solicita la descarga de la consulta en archivo de Excel, pulsando el bot&#243;n "Descargar reporte". El resultado (archivo de Excel "ReportesDinamicosPIBGasto.xls") se guarda en la carpeta "XLSData".
+
+###### Valores Corrientes
+
+```{r, comment="", warning=F, message=F, echo=T} 
+# rm(list = ls())
+
+## Tidy Data
+PIBGasto_Corrientes <- readxl::read_excel("XLSData/ReportesDinamicosPIBGasto.xls",
+                            sheet = "VALORES CORRIENTES",
+                            skip = 10) %>%
+  stats::na.omit() %>%
+  # filter(CONCEPTO != "CONCEPTO") %>%
+  dplyr::mutate(N = 1:14,
+         Tipo_Serie = case_when(N %in% 1:7 ~ "Original",
+                                    N %in% 8:14 ~ "Desestacionalizada"),
+         Enfoque_PIB = "Gasto")  %>%
+  dplyr::rename(Nombre_Serie = 1) %>%
+  dplyr::select(N,Nombre_Serie,Tipo_Serie,Enfoque_PIB,everything()) %>%
+  dplyr::select(-starts_with("..."))
+quarters <- c("N","Nombre_Serie","Tipo_Serie","Enfoque_PIB",
+              as.character(as.POSIXct(seq(as.Date("2000/3/2"),
+                                          as.Date(fecha_fin),
+                                          by = "quarter"))))
+names(PIBGasto_Corrientes) <- quarters
+PIBGasto_Corrientes <- PIBGasto_Corrientes %>%
+  tidyr::gather("Fecha","Valor",5:ncol(.)) %>%
+  dplyr::mutate(Valor = as.double(Valor),
+         Fecha = as.Date(Fecha),
+         Tipo_Valor = "Corrientes") %>%
+  dplyr::select(N,Enfoque_PIB,Tipo_Serie,Tipo_Valor,Nombre_Serie,Fecha,Valor)
+```
+
+###### Valores Constantes
+
+```{r, comment="", warning=F, message=F, echo=T} 
+# rm(list = ls())
+
+## Tidy Data
+PIBGasto_Constantes <- readxl::read_excel("XLSData/ReportesDinamicosPIBGasto.xls",
+                            sheet = "VALORES CONSTANTES",
+                            skip = 10) %>%
+  stats::na.omit() %>%
+  dplyr::mutate(N = 1:14,
+         Tipo_Serie = case_when(N %in% 1:7 ~ "Original",
+                                    N %in% 8:14 ~ "Desestacionalizada"),
+         Enfoque_PIB = "Gasto")  %>%
+  dplyr::rename(Nombre_Serie = 1) %>%
+  dplyr::select(N,Nombre_Serie,Tipo_Serie,Enfoque_PIB,everything()) %>%
+  dplyr::select(-starts_with("..."))
+quarters <- c("N","Nombre_Serie","Tipo_Serie","Enfoque_PIB",
+              as.character(as.POSIXct(seq(as.Date("2000/3/2"),
+                                          as.Date(fecha_fin),
+                                          by = "quarter"))))
+names(PIBGasto_Constantes) <- quarters
+PIBGasto_Constantes <- PIBGasto_Constantes %>%
+  tidyr::gather("Fecha","Valor",5:ncol(.)) %>%
+  dplyr::mutate(Valor = as.double(Valor),
+         Fecha = as.Date(Fecha),
+         Tipo_Valor = "Constantes") %>%
+  dplyr::select(N,Enfoque_PIB,Tipo_Serie,Tipo_Valor,Nombre_Serie,Fecha,Valor)
+```
+
+###### Serie Tendencia-Ciclo
+
+```{r, comment="", warning=F, message=F, echo=T} 
+# rm(list = ls())
+
+## Tidy Data
+PIBGasto_Tendencia_Ciclo <- readxl::read_excel("XLSData/ReportesDinamicosPIBGasto.xls",
+                            sheet = "SERIE TENDENCIA CICLO",
+                            skip = 8) %>%
+  stats::na.omit() %>%
+  # filter(CONCEPTO != "CONCEPTO") %>%
+  dplyr::mutate(N = 1:nrow(.),
+         Tipo_Serie = "Tendencia_Ciclo",
+         Enfoque_PIB = "Gasto",
+         Nombre_Serie = "Tendencia_Ciclo",
+         Tipo_Valor = "Tendencia_Ciclo",
+         Fecha = seq(as.Date("2000/3/2"),
+                     as.Date(fecha_fin),
+                     by = "quarter"))  %>%
+  dplyr::rename(Valor = `Serie Tendencia Ciclo`) %>%
+  dplyr::select(N,Nombre_Serie,Tipo_Serie,Enfoque_PIB,everything()) %>%
+  dplyr::select(-c(5,6))
+PIBGasto_Tendencia_Ciclo <- PIBGasto_Tendencia_Ciclo %>%
+  dplyr::select(N,Enfoque_PIB,Tipo_Serie,Tipo_Valor,Nombre_Serie,Fecha,Valor)
+```
+
+##### Unificar en un solo data.frame
+
+```{r, comment="", warning=F, message=F, echo=T} 
+PIB_Trimestral <- rbind(PIBGasto_Constantes,PIBGasto_Corrientes,PIBGasto_Tendencia_Ciclo,
+                        PIBProduccion_Constantes,PIBProduccion_Corrientes,PIBProduccion_Tendencia_Ciclo)
+rm(list=setdiff(ls(), "PIB_Trimestral"))
+saveRDS(PIB_Trimestral, file = "RData/PIB_Trimestral.rds")
+DT::datatable(PIB_Trimestral)
+```
+
+##### Graficar 
+
+```{r, comment="", warning=F, message=F, echo=T} 
+## Seleccionar Variables
+Nombre_Enfoque_PIB <- "Gasto"     # Opciones: "Gasto", "Producción"
+Nombre_Tipo_Serie <- "Original"        # Opciones: "Desestacionalizada", "Original", "Tendencia_Ciclo"
+Nombre_Tipo_Valor <- "Corrientes"      # Opciones: "Constantes", "Corrientes", "Tendencia_Ciclo"
+
+##### Grafico Dinamico, PIB Corrientes #####
+plotDin <- PIB_Trimestral %>%
+  dplyr::filter(Enfoque_PIB == Nombre_Enfoque_PIB,
+         Tipo_Serie == Nombre_Tipo_Serie,
+         Tipo_Valor == Nombre_Tipo_Valor) %>%
+  plotly::plot_ly(x = ~Fecha,
+          y = ~Valor,
+          type = 'scatter',
+          mode = 'lines',
+          color = ~Nombre_Serie) %>%
+  layout(legend = list(x = 0.01, y = 0.99, bgcolor = "transparent"),
+         xaxis = list(title = ""),
+         yaxis = list(title = "Millones de Lempiras"),
+         title = paste0("PIB Enfoque del ",
+         Nombre_Enfoque_PIB, 
+         ", Serie ",Nombre_Tipo_Serie,
+         ", Valores ",Nombre_Tipo_Valor))
+plotDin
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=T} 
+
+```
