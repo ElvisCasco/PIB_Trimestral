@@ -1,0 +1,1040 @@
+---
+title: "Pronosticar PIB Trimestral en Honduras"
+editor_options:
+  chunk_output_type: inline
+output:
+  html_document:
+    code_folding: hide
+    theme: spacelab
+    toc: yes
+  pdf_document:
+    toc: yes
+    keep_tex: true
+  word_document:
+    toc: yes
+fontsize: 11
+always_allow_html: yes
+---
+
+\pagebreak
+
+# Modelos Univariados
+
+Este trabajo tiene como objetivo desarrollar un ejercicio utilizando el PIB Trimestral como referencia para evaluar diferentes modelos ARIMA y los resultados de pron&#243;stico dentro y fuera de muestra que se obtienen, además de todas las pruebas estad&#237;sticas pertinentes. Se observa que, este tipo de ejercicios solamente son &#250;tiles para pronosticar resultados de las series en el corto plazo, puesto que los mismos presentan una reversi&#243;n a la media; por tanto, en caso de requerir un an&#225;lisis de mediano plazo, se recomienda el uso de modelos determin&#237;sticos.
+
+Conviene resaltar que se program&#243; todo el ejercicio en R, incluyendo el presente informe; esto facilita la implementaci&#243;n para otras series econ&#243;micas de utilidad en el Banco Central de Honduras. La referencia a los c&#243;digos b&#225;sicos se tom&#243; del curso de Macroeconomic Forecasting recibido en junio de 2019 en el Study Centre Gerzensee (Suiza). **Los resultados no representan ninguna postura institucional, solamente se publican con fines de mostrar una aplicaci&#243;n de pron&#243;stico con modelos ARIMA.**
+
+
+```{r, comment="", warning=F, message=F, echo=F}
+knitr::opts_chunk$set(fig.width=6, fig.height=3.5)
+options(kableExtra.auto_format = FALSE)
+rm(list=ls())
+library(CADFtest)
+library(forecast)
+library(fredr)
+library(ggfortify)
+library(kableExtra)
+library(Metrics)
+library(plotly)
+library(reshape2)
+library(tidyverse)
+library(tsbox)
+library(x12)
+library(xts)
+
+source("R/functions.R")
+```
+
+## 1) Importar los datos ajustados estacionalmente
+
+Se utiliza el [PIB trimestral para Honduras](https://see.bch.hn/portalPIBT/) y el [PIB de Estados Unidos de Am&#233;rica](https://fred.stlouisfed.org/series/GDPC1).
+
+```{r, comment="", warning=F, message=F, echo=F} 
+##### Definir fechas #####
+inicio <- "2000-01-01"
+fin <- "2019-10-01"
+dates <- seq(as.Date(inicio), as.Date(fin), by = "quarter")
+
+##### PIB Honduras, serie de tiempo #####
+Data_HN <- readRDS("RData/PIB_Trimestral.rds")
+Data_HN <- Data_HN %>%
+  dplyr::filter(Enfoque_PIB == "Gasto",
+                Tipo_Serie == "Desestacionalizada",
+                Tipo_Valor == "Constantes",
+                Nombre_Serie == "Producto Interno Bruto a precios de mercado") %>%
+  dplyr::select(Fecha, Valor)
+PIB_HN = xts::xts(Data_HN[, 2], order.by = dates)
+PIB_HN = ts_ts(ts_span(PIB_HN, inicio, fin))
+
+##### PIB USA #####
+# https://fred.stlouisfed.org/series/GDPC1
+fredr_set_key("8828b5fd4b7cf9795f597aca7954c957")
+GDP_USA = fredr::fredr(series_id = "GDPC1",
+                observation_start = as.Date(inicio)
+                )
+GDP_USA = xts::xts(GDP_USA[, 3], order.by = dates)
+GDP_USA = ts_ts(ts_span(GDP_USA, inicio, fin))
+```
+
+## 2) Inspecci&#243;n de los datos: PIB_HN
+
+```{r, comment="", warning=F, message=F, echo=F} 
+if(getOutputFormat() == 'html_document') {
+  plot_ly(Data_HN, 
+          x = ~Fecha, 
+          y = ~log(Valor),
+          type = 'scatter', mode = 'lines') %>%
+    layout(title = "PIB Honduras (en logs): Valores Constantes, Serie Desestacionalizada",
+           xaxis = list(title = ""),
+           yaxis = list (title = ""))
+ } else {
+  ts_plot(
+    `PIB_HN`= log(PIB_HN),
+    title = "PIB Honduras (en logs)",
+    subtitle = "Valores Constantes, Serie Desestacionalizada"
+    )
+}
+```
+
+```{r, comment="", warning=F, message=F, echo=F} 
+if(getOutputFormat() == 'html_document') {
+  plot_ly(Data_HN, x = ~Fecha, y = ~c(rep(NA,1),diff(log(Valor),1))*100,
+          type = 'scatter', mode = 'lines') %>%
+    layout(title = "PIB Honduras: Tasa de crecimiento trimestral",
+           xaxis = list(title = ""),
+           yaxis = list (title = "%"))
+ } else {
+  ts_plot(
+    `PIB_HN`= tsbox::ts_pc(PIB_HN),
+    title = "PIB Honduras",
+    subtitle = "Tasa de crecimiento respecto al trimestre anterior"
+    )
+}
+```
+
+```{r, comment="", warning=F, message=F, echo=F} 
+if(getOutputFormat() == 'html_document') {
+  plot_ly(Data_HN, x = ~Fecha, y = ~c(rep(NA,4),diff(log(Valor),4))*100,
+          type = 'scatter', mode = 'lines') %>%
+    layout(title = "PIB Honduras: Tasa de crecimiento interanual",
+           xaxis = list(title = ""),
+           yaxis = list (title = "%"))
+ } else {
+  ts_plot(
+    `PIB_HN`= tsbox::ts_pcy(PIB_HN),
+    title = "PIB Honduras",
+    subtitle = "Tasa de crecimiento interanual"
+    )
+}
+```
+
+**Conclusiones preliminares:** podemos observar que el PIB es no estacionario. Debido a esto, estimaremos el modelo en primeras diferencias. La tasa de crecimiento trimestral (que se aproxima a trav&#233;s de la primera diferencia logar&#237;tmica) aparenta ser estacionaria. Pueden observarse tasas de crecimiento at&#237;picas (outliers) en diciembre 2008 y marzo 2009, siendo mayor esta &#250;ltima fecha.
+
+Regularmente, el PIB se reporta en tasas de crecimiento interanual. Al finalizar el ejercicio, se reportar&#225; el pron&#243;stico en variaciones interanuales, calculadas a trav&#233;s de la estimaci&#243;n del modelo en primeras diferencias.
+
+## 3) Pruebas de ra&#237;z unitaria
+
+Una explicación respecto a esta prueba, basada en Pindyck & Rubinfeld (2001), se encuentra en los Anexos 1 y 2. Se realiz&#243; una prueba de Dickey Fuller Aumentada (ADF, por sus siglas en ingl&#233;s)^[Anexos 1 y 2] para verificar si las series contienen una ra&#237;z unitaria. Debido a que las series tienen una tendencia creciente, se agrega una tendencia como un componente determin&#237;stico^[Anexo 1]. Los rezagos de la regresi&#243;n se seleccionan mediante el criterio de informaci&#243;n bayesiano (BIC, por sus siglas en ingl&#233;s). 
+
+Las pruebas sugieren que tenemos que utilizar primeras diferencias para obtener series estacionarias; esto puede verse con los resultados en dlogs (diferenciales logar&#237;tmicos), donde se verifica si las primeras diferencias de las series contienen una ra&#237;z unitaria. Con la serie transformada en dlogs, se rechaza la hip&#243;tesis nula de ra&#237;z unitaria. El PIB en niveles es claramente no estacionario, mientras que su tasa de crecimiento (dlogs) es estacionaria. La misma situaci&#243;n se presenta para el PIB de Estados Unidos de Am&#233;rica (GDP).
+
+```{r, comment="", warning=F, message=F, echo=F} 
+# Criterio en una sola tabla
+df <- list(log_PIB_HN  = as.matrix(log(PIB_HN)),
+           dlog_PIB_HN = as.matrix(ts_diff(log(PIB_HN))),
+           log_GDP_USA  = as.matrix(log(GDP_USA)),
+           dlog_GDP_USA = as.matrix(ts_diff(log(GDP_USA))))
+tabla_adf(df, maxLags = 10, lagSelection = "BIC") %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+\pagebreak
+
+## 4) Modelos de pron&#243;stico ARIMA
+
+Debido a que la serie de PIB se incorpora en primeras diferencias, con base en las pruebas de ra&#237;z unitaria, los modelos ARIMA que se especificar&#225;n en este trabajo pueden ser definidos como un proceso ARMA(p,q)^[Hayashi (2000)].
+
+\begin{equation}
+Y_t=c+\sum_{i=1}^p\phi_i Y_{t-i}+\sum_{j=0}^q\theta_j \varepsilon_{t-i}
+\end{equation}
+
+utilizando el operador de rezagos:
+
+\begin{equation}
+\begin{split}\phi(L) Y_{t}&=c+\theta(L)\varepsilon_t \\ \phi(L)&=1-\phi_1L-\dots-\phi_pL^p \\ \theta(L)&=\theta_0+\theta_1L+\dots+\theta_qL^q\end{split}
+\end{equation}
+
+Los coeficientes $\phi$ corresponden al proceso autorregresivo y $\theta$ a los de media m&#243;vil.
+
+### a) Modelo inicial (ARIMA(1,0,0))
+
+Nota: se modela el PIB en diferenciales logar&#237;tmicos (dlog) y se incluye una constante. En la funci&#243;n `Arima()`, el primer elemento es la serie que queremos pronosticar/modelar, el orden es un vector con el n&#250;mero de rezagos autorregresivos (p), el n&#250;mero de veces que se aplican diferenciales a la serie (d) y el n&#250;mero de rezagos de media m&#243;vil (q). Debido a que la serie ya est&#225; expresada en diferencias, se incluye d = 0 en todas las aplicaciones.
+
+#### ARIMA(1,0,0): Evaluaci&#243;n de los coeficientes
+
+```{r, comment="", warning=F, message=F, echo=F} 
+dPIB_HN = ts_diff(log(PIB_HN))
+Model_ar1 = forecast::Arima(dPIB_HN, order = c(1,0,0), include.constant= TRUE)
+
+# Funcion para estadisticos de coeficientes, modelos ARIMA 
+table_coef(Model_ar1, caption = "Coeficientes del ARIMA(1,0,0)") %>%
+  kable_styling(latex_options = "hold_position")
+coefs_ar1 <- coefs
+table_stats(Model_ar1, caption = "Estad\u00EDsticos del ARIMA(1,0,0)") %>%
+  kable_styling(latex_options = "hold_position")
+stats_ar1 <- cbind(data.frame(Model = "ar1"), stats)
+```
+
+Puede verse que solamente la constante es estad&#237;sticamente significativa.^[Evaluating forecast accuracy](https://otexts.com/fpp2/accuracy.html)].
+
+#### ARIMA(1,0,0): An&#225;lisis de los residuales
+
+```{r, comment="", warning=F, message=F, echo=F} 
+table_resids(Model_ar1, caption = "Estad\u00EDsticos de residuales ARIMA(1,0,0): Training set error measures") %>%
+  kable_styling(latex_options = "hold_position")
+evalResids_ar1 <- cbind(data.frame(Model = "ar1"), eval_resids)
+LjungBox_ar1 <- checkresiduals(Model_ar1)
+autoplot(Model_ar1) + 
+  ggtitle("Evaluaci\u00F3n del modelo ARIMA(1,0,0)") +
+  labs(caption = "rojo = pron\u00F3stico, negro = observado",
+       x = "", y = "Variaci\u00F3n trimestral") +
+  theme_minimal()
+BoxLjung_ar1 <- Box.test(Model_ar1$residuals, lag=5, fitdf=1, type="Lj")
+BoxLjung_ar1
+jarque.bera.test(Model_ar1$residuals[!is.na(Model_ar1$residuals)])
+```
+
+Tanto la prueba de Ljung-Box como la de Box-Ljung muestran que los residuos del modelo ARIMA(1,0,0) no tienen autocorrelaci&#243;n. Adicionalmente, la prueba de Jarque-Bera implica normalidad en los residuos.
+
+#### ARIMA(1,0,0): Pron&#243;stico fuera de muestra
+
+h corresponde al n&#250;mero de per&#237;odos a ser estimados (dos a&#241;os).
+
+```{r, comment="", warning=F, message=F, echo=F} 
+For_ar1 = forecast(Model_ar1, h = 8)#, level = c(25,80,95))
+
+df <- fortify(For_ar1)
+plot_ar1  <- ggplot(data = df,aes(x = Index, y = Data*100)) +
+  geom_line(col = 'black') +
+  geom_line(aes(y=Fitted*100), col='blue', linetype = "dashed") +
+  geom_line(aes(y=`Point Forecast`*100, col='red')) +
+  ggtitle("PIB Honduras: Pron\u00F3stico ARIMA(1,0,0)") +
+  labs(caption = "rojo = pron\u00F3stico, azul = estimado, negro = observado",
+       x = "", y = "Variaci\u00F3n trimestral (%)") +
+  theme_minimal() + 
+  theme(legend.position="none")
+
+if(getOutputFormat() == 'html_document') {
+  ggplotly(plot_ar1) %>%
+   layout(annotations =
+   list(x = 1, y = -0.1, text = "rojo = pron\u00F3stico, azul = estimado, negro = observado,
+        abanico = intervalos de confianza al 80% y 95%",
+        showarrow = F, xref='paper', yref='paper',
+        xanchor='right', yanchor='auto', xshift=0, yshift=0,
+        font=list(size = 12, color="black"))
+   )
+ } else {
+  plot_ar1
+}
+```
+
+Algunas veces se necesita presentar el pron&#243;stico en variaciones interanuales. Una manera de hacerlo es transformando las series hist&#243;ricas y el pron&#243;stico de las tasas de crecimiento y graficar el resultado. El modelo se estima en dlogs, luego tenemos que transformar la serie para volverla a niveles antes de calcular las tasas de crecimiento.
+
+```{r, comment="", warning=F, message=F, echo=F} 
+# Paso 1: Unir datos historicos y de pronostico
+temp1 = tsbox::ts_bind(For_ar1$x, For_ar1$mean)
+temp1[1] = 0
+# Paso 2: Calcular la suma acumulada de dlogs y utilizar exp para obtener el nivel
+temp2 = exp(ts_cumsum(temp1))
+# Paso 3: Calcular tasa de crecimiento interanual
+temp3 = tsbox::ts_pcy(temp2)
+# Paso 4: Separar datos historicos y de pronostico para graficar
+fcstStart_ar1 = tsbox::ts_start(For_ar1$mean)
+histEnd   = tsbox::ts_end(For_ar1$x)
+HistYoY = tsbox::ts_span(temp3, NULL, histEnd)
+FcstYoY_ar1 = tsbox::ts_span(temp3, fcstStart_ar1, NULL)
+
+if(getOutputFormat() == 'html_document') {
+  dfHist <- data.frame(date = as.Date(time(HistYoY)), HistYoY = as.matrix(HistYoY))
+  dfFor_ar1 <- data.frame(date = as.Date(time(FcstYoY_ar1)),
+                          FcstYoY_ar1 = as.matrix(FcstYoY_ar1))
+  df <- merge(dfHist, dfFor_ar1, all.x = TRUE, all.y = TRUE, by="date")
+  plotly::plot_ly(df, x = ~date, y = ~HistYoY, name = 'Observado', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~FcstYoY_ar1, name = 'Pron\u00F3stico ARIMA(1,0,0)', type = 'scatter', mode = 'lines') %>%
+    layout(title = list(text = paste0('PIB Honduras: Pron\u00F3stico ARIMA(1,0,0)')),
+           xaxis = list(title = ""),
+           yaxis = list (title = "Variaci\u00F3n interanual (%)"))
+ } else {
+  tsbox::ts_plot(
+    `History`= HistYoY,
+    `Forecast` = FcstYoY_ar1,
+    title = "Honduras: PIB y Pron\u00F3stico ARIMA(1,0,0)",
+    subtitle = "Variaci\u00F3n interanual (%)"
+  )
+}
+```
+
+Los resultados sugieren que este modelo sencillo puede mejorarse. Los residuales muestran valores at&#237;picos, adem&#225;s que el pron&#243;stico converge r&#225;pidamente al promedio de los datos observados y no puede incorporarse fen&#243;menos como choques aleatorios (ej: efectos del COVID-19 o una crisis interna similar a la de 2008-2009). 
+
+En los ejercicios siguientes, se trata de seleccionar el orden de los rezagos con un criterio de informaci&#243;n y se incluyen variables ex&#243;genas adicionales que pueden ser importantes para explicar el crecimiento del PIB en Honduras.
+
+### b) Procedimiento autom&#225;tico para seleccionar el modelo de pron&#243;stico
+
+Una estrategia similar para seleccionar un modelo de pron&#243;stico es mediante el uso de la funci&#243;n `auto.arima`. Esta funci&#243;n selecciona autom&#225;ticamente el modelo de acuerdo con alg&#250;n criterio. En este ejemplo se usa el AIC.^[Algunas veces esta selecci&#243;n autom&#225;tica con AIC proporciona resultados inconsistentes.]
+
+#### ARIMA autom&#225;tico: Evaluaci&#243;n de los coeficientes
+
+```{r, comment="", warning=F, message=F, echo=F} 
+Model_Auto = auto.arima(dPIB_HN, 
+                       max.p = 4, max.q = 4, d = 0, max.P = 4, max.Q = 4,
+                       ic = c("aic"), allowdrift = T, allowmean = TRUE, 
+                       seasonal = T, stepwise = FALSE)
+table_coef(Model_Auto, caption = "Coeficientes del ARIMA autom\u00E1tico") %>%
+  kable_styling(latex_options = "hold_position")
+coefs_Auto <- coefs
+table_stats(Model_Auto, caption = "Estad\u00EDsticos del ARIMA autom\u00E1tico") %>%
+  kable_styling(latex_options = "hold_position")
+stats_Auto <- cbind(data.frame(Model = "autom\u00E1tico"), stats)
+```
+
+Todos los coeficientes (excepto el correspondiente al AR(2)) son estad&#237;sticamente significativos al 5%.
+
+#### ARIMA autom&#225;tico: An&#225;lisis de los residuales
+
+```{r, comment="", warning=F, message=F, echo=F} 
+table_resids(Model_Auto, 
+             caption = "Estad\u00EDsticos de residuales ARIMA autom\u00E1tico: Training set error measures") %>%
+  kable_styling(latex_options = "hold_position")
+evalResids_Auto <- cbind(data.frame(Model = "autom\u00E1tico"), eval_resids)
+
+LjungBox_Auto <- checkresiduals(Model_Auto)
+autoplot(Model_Auto) + 
+  ggtitle("Evaluaci\u00F3n del modelo ARIMA autom\u00E1tico") +
+  labs(caption = "rojo = pron\u00F3stico, negro = observado",
+       x = "", y = "Variaci\u00F3n trimestral") +
+  theme_minimal()
+BoxLjung_Auto <- Box.test(Model_Auto$residuals, lag=5, fitdf=1, type="Lj")
+BoxLjung_Auto
+jarque.bera.test(Model_Auto$residuals[!is.na(Model_Auto$residuals)])
+## OJO MPE y MAPE son diferentes al summary
+```
+
+Al igual que con el modelo ARIMA(1,0,0), los residuos no presentan autocorrelaci&#243;n y se ajustan a una distribuci&#243;n normal, con valores at&#237;picos significativos. Nuevamente, se transforman los resultados a tasas de crecimiento interanual.
+
+#### ARIMA autom&#225;tico: Pron&#243;stico fuera de muestra
+
+```{r, comment="", warning=F, message=F, echo=F} 
+For_Auto = forecast(Model_Auto, h = 8) 
+df <- fortify(For_Auto)
+plot_Auto  <- ggplot(data = df,aes(x = Index, y = Data*100)) +
+  geom_line(col = 'black') +
+  geom_line(aes(y=Fitted*100), col='blue', linetype = "dashed") +
+  geom_line(aes(y=`Point Forecast`*100, col='red')) +
+  ggtitle("PIB Honduras: Pron\u00F3stico ARIMA autom\u00E1tico") +
+  labs(caption = "rojo = pron\u00F3stico, azul = estimado, negro = observado",
+       x = "", y = "Variaci\u00F3n trimestral (%)") +
+  theme_minimal() + 
+  theme(legend.position="none")
+
+if(getOutputFormat() == 'html_document') {
+  ggplotly(plot_Auto) %>% 
+   layout(annotations = 
+   list(x = 1, y = -0.1, text = "rojo = pron\u00F3stico, azul = estimado, negro = observado", 
+        showarrow = F, xref='paper', yref='paper', 
+        xanchor='right', yanchor='auto', xshift=0, yshift=0,
+        font=list(size=12, color="black"))
+   )
+ } else {
+  plot_Auto
+}
+```
+
+Puede observarse que el pron&#243;stico converge con menor velocidad respecto al modelo ARIMA(1,0,0).
+
+Variaciones interanuales:
+
+```{r, comment="", warning=F, message=F, echo=F} 
+# Paso 1: Unir datos historicos y de pronostico
+temp1 = ts_bind(For_Auto$x, For_Auto$mean)
+temp1[1] = 0
+# Paso 2: Calcular la suma acumulada de los dlogs y aplicar exp para obtener el nivel
+temp2 <- exp(ts_cumsum(temp1))
+# Paso 3: Calcular la tasa de crecimiento interanual
+temp3 = ts_pcy(temp2)
+# Paso 4: Separar series historicas y de pronostico para el grafico
+fcstStart_Auto = ts_start(For_Auto$mean)
+FcstYoY_Auto = ts_span(temp3, fcstStart_Auto, NULL)
+dfFor_Auto <- data.frame(date = as.Date(time(FcstYoY_Auto)),
+                        FcstYoY_ar1 = as.matrix(FcstYoY_ar1),
+                        FcstYoY_Auto = as.matrix(FcstYoY_Auto))
+
+if(getOutputFormat() == 'html_document') {
+  df <- merge(dfHist, dfFor_Auto, all.x = TRUE, all.y = TRUE, by="date")
+  plot_ly(df, x = ~date, y = ~HistYoY, name = 'Observado', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~FcstYoY_ar1, name = 'ARIMA(1,0,0)', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~FcstYoY_Auto, name = 'ARIMA Autom\u00E1tico', type = 'scatter', mode = 'lines') %>%
+    layout(title = list(text = paste0('PIB Honduras: Pron\u00F3sticos ARIMA')),
+           xaxis = list(title = ""),
+           yaxis = list (title = "Variaci\u00F3n interanual (%)"))
+ } else {
+  ts_plot(
+    `Hist.`= ts_span(HistYoY, "2000-01-01"),
+    `ARIMA(1,0,0)` = FcstYoY_ar1,
+    `Autom.` = FcstYoY_Auto,
+    title = "Honduras: PIB y Pron\u00F3stico ARIMA",
+    subtitle = "Variaci\u00F3n interanual (%)"
+  )
+}
+
+# Tabla de resultados
+names(dfFor_Auto) <- c("Fecha","ARIMA(1,0,0)","Autom\u00E1tico")
+kable(dfFor_Auto,
+      caption = "Comparaci\u00F3n de resultados de pron\u00F3stico: Variaci0nes Interanuales") %>%
+  kable_styling(c("striped", "bordered")) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+Los resultados del modelo autom&#225;tico son bastante similares a los del modelo ARIMA(1,0,0). Puede observarse que, en todos los casos, los resultados de pron&#243;stico fuera de muestra para un per&#237;odo mayor a seis meses convergen hacia valores similares a la media hist&#243;rica, por tanto los mismos no son eficientes si se toman en cuenta los &#250;ltimos datos observados y tambi&#233;n si se muestra que la serie puede ser explicada por un proceso m&#225;s determin&#237;stico, evaluando variables explicativas como posibles regresores.
+
+## 5) Extensi&#243;n del modelo
+
+### a) Control por dummies
+
+Con el fin de que la media de los errores en el procedimiento autom&#225;tico no se vea afectada por valores extremos (variaciones trimestrales mayores a 1.5%), se incluyen dummy en dicho modelo para la siguiente fecha:
+
+- Primer trimestre 2009 (D09a);
+
+- Segundo trimestre 2009 (D09a);
+
+```{r, comment="", warning=F, message=F, echo=F} 
+D <- ts_xts(dPIB_HN)
+D[D != 0] = 0
+D09a <- D
+D09a["2009-01-01"] <- 1
+D09a <- ts_xts(D09a)
+D09b <- D
+D09b["2009-04-01"] = 1
+D09b <- ts_xts(D09b)
+
+Model_ArimaDummy = Arima(dPIB_HN, order = c(2, 0, 1), 
+                         include.constant= TRUE, xreg = ts_c(D09a, D09b))
+table_coef(Model_ArimaDummy, caption = "Coeficientes del ARIMA, incluyendo dummies") %>%
+  kable_styling(latex_options = "hold_position")
+table_stats(Model_ArimaDummy, caption = "Estad\u00EDsticos del ARIMA, incluyendo dummies") %>%
+  kable_styling(latex_options = "hold_position")
+table_resids(Model_ArimaDummy, 
+             caption = "Estad\u00EDsticos de residuales ARIMA incl. Dummies: Training set error measures") %>%
+  kable_styling(latex_options = "hold_position")
+LjungBox_ArimaDummy <- checkresiduals(Model_ArimaDummy)
+autoplot(Model_ArimaDummy) + theme_minimal()
+BoxLjung_ArimaDummy <- Box.test(Model_ArimaDummy$residuals, lag=5, fitdf=1, type="Lj")
+BoxLjung_ArimaDummy
+evalResids_ArimaDummy <- cbind(data.frame(Model = "ARIMA incl. Dummies"), eval_resids)
+jarque.bera.test(Model_ArimaDummy$residuals[!is.na(Model_ArimaDummy$residuals)])
+```
+
+Aunque el comportamiento de los residuos es menos aceptable tomando en cuenta los estad&#237;sticos de autocorrelaci&#243;n y normalidad, se ha mejorado respecto a estimaci&#243;n dentro de muestra al eliminar los valores at&#237;picos m&#225;s grandes.
+
+### b) Econom&#237;a Estadounidense y Dummies
+
+Adicionalmente, se incluye como variable explicativa el PIB de Estados Unidos de Am&#233;rica (GDP) en un segundo modelo:
+
+```{r, comment="", warning=F, message=F, echo=F} 
+##### Evaluando modelo RegArima #####
+dGDP_USA = ts_diff(log(GDP_USA))
+dGDP_USA <- ts_xts(dGDP_USA)
+dPIB_HN <- ts_xts(dPIB_HN)
+Model_ArimaX = Arima(dPIB_HN, order = c(2, 0, 1), include.constant= TRUE,
+                     xreg = ts_c(dGDP_USA, D09a, D09b))
+table_coef(Model_ArimaX, caption = "Coeficientes del ARIMA, incluyendo dummies") %>%
+  kable_styling(latex_options = "hold_position")
+table_stats(Model_ArimaX, caption = "Estad\u00EDsticos del ARIMA, incluyendo dummies") %>%
+  kable_styling(latex_options = "hold_position")
+table_resids(Model_ArimaX, 
+             caption = "Estad\u00EDsticos de residuales ARIMA incl. Regresores: Training set error measures") %>%
+  kable_styling(latex_options = "hold_position")
+LjungBox_ArimaX <- checkresiduals(Model_ArimaX)
+autoplot(Model_ArimaX) + theme_minimal()
+BoxLjung_ArimaX <- Box.test(Model_ArimaX$residuals, lag=5, fitdf=1, type="Lj")
+BoxLjung_ArimaX
+jarque.bera.test(Model_ArimaX$residuals[!is.na(Model_ArimaX$residuals)])
+
+evalResids_ArimaX <- cbind(data.frame(Model = "ARIMA incl. Regresores"), eval_resids)
+```
+
+## 6) Comparaci&#243;n de modelos
+
+### Prueba de Ljung-Box
+
+Esta prueba se utiliza para verificar correlaci&#243;n serial en los residuales^[<https://otexts.com/fpp2/residuals.html>].
+
+$Q^{\star}=T(T+2)\sum_{k=1}^h(T-k)^{-1}\hat\rho_k^2$
+
+- $T$ = n&#250;mero de observaciones;
+
+- $h$ = m&#225;ximo rezago a ser considerado;
+
+- $\hat\rho_k$ es la autocorrelaci&#243;n para el rezago $k$;
+
+Valores altos de $Q^{\star}$ sugieren que la autocorrelaci&#243;n no proviene de una serie que se comporta como ruido blanco. $Q^{\star}$ tiene una distribuci&#243;n $\chi^2$ con $(h-K)$ grados de libertad, donde $K$ es el n&#250;mero de par&#225;metros en el modelo. Si $Q^{\star}$ es no significativo (p-values relativamente grandes), podemos concluir que los residuos no pueden distinguirse de un proceso ruido blanco.
+
+```{r, comment="", warning=F, message=F, echo=F} 
+LjungBox <- data.frame(Modelos = c("ARIMA(1,0,0)", "ARIMA Autom\u00E1tico",
+                                   "ARIMA con Dummies","Arima con Regresores"),
+                       Q = c(LjungBox_ar1$statistic,LjungBox_Auto$statistic,
+                             LjungBox_ArimaDummy$statistic,LjungBox_ArimaX$statistic),
+                       df = c(LjungBox_ar1$parameter,LjungBox_Auto$parameter,
+                             LjungBox_ArimaDummy$parameter,LjungBox_ArimaX$parameter),
+                       p_value = c(LjungBox_ar1$p.value,LjungBox_Auto$p.value,
+                             LjungBox_ArimaDummy$p.value,LjungBox_ArimaX$p.value))
+kable(LjungBox,
+      caption = "Ljung-Box test") %>%
+  kable_styling(c("striped", "bordered")) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+De acuerdo con estos resultados, el modelo cuyos residuales se comportan m&#225;s como un proceso ruido blanco es el ARIMA seleccionado de manera autom&#225;tica.
+
+### Prueba de Box-Ljung
+
+Este tests examina la hip&#243;tesis nula de independencia en una serie de tiempo dada; se trata de comprobar si un grupo de autocorrelaciones son simult&#225;neamente cero. Esta prueba es asint&#243;ticamente equivalente a la prueba anterior; si el p-value es mayor a 0.05, los residuales son independientes y los errores pueden considerarse una aproximaci&#243;n a un proceso ruido blanco. Los par&#225;metros para su c&#225;lculo son los mismos a los usados en la prueba anterior:
+
+$Q^{\star}=T\sum_{k=1}^K\hat\rho_k^2$
+
+El estad&#237;stico Q est&#225; distribuido (aproximadamente) como una $\chi^2$ con $K$ grados de libertad. De esta manera, si el valor calculado de $Q^{\star}$ es mayor que el nivel crít&#237;co (digamos, 5%), podemos asegurar con un 95% de confianza que los coeficientes de autocorrelaci&#243;n verdaderos $\rho_1,...,\rho_k$ no todos son cero.
+
+Conviene resaltar que para estas pruebas, no existe una gu&#237;a clara para la elecci&#243;n de $K$. Si $K$ es pequeño, existe el peligro de no tomar en cuenta autocorrelaciones de mayor orden, pero si $K$ es demasiado grande relativo al tama&#241;o de la muestra, la distribuci&#243;n en muestras finitas est&#225; propensa a deteriorarse, divergiendo de la distribuci&#243;n $\chi^2$.^[Hayashi (2000), pgs.142-144]
+
+```{r, comment="", warning=F, message=F, echo=F} 
+BoxLjung <- data.frame(Modelos = c("ARIMA(1,0,0)","ARIMA Autom\u00E1tico",
+                                   "ARIMA con Dummies","Arima con Regresores"),
+                       ChiSqrt = c(BoxLjung_ar1$statistic,BoxLjung_Auto$statistic,
+                                   BoxLjung_ArimaDummy$statistic,BoxLjung_ArimaX$statistic),
+                       df = c(BoxLjung_ar1$parameter,BoxLjung_Auto$parameter,
+                              BoxLjung_ArimaDummy$parameter,BoxLjung_ArimaX$parameter),
+                       p_value = c(BoxLjung_ar1$p.value,BoxLjung_Auto$p.value,
+                              BoxLjung_ArimaDummy$p.value,BoxLjung_ArimaX$p.value))
+kable(BoxLjung,
+      caption = "Prueba de Box-Ljung") %>%
+  kable_styling(c("striped", "bordered")) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+Al igual que con la prueba anterior, el modelo cuyos residuales se aproximan m&#225;s a un proceso ruido blanco es el ARIMA autom&#225;tico.
+
+### Evaluaci&#243;n del pron&#243;stico, residuales dentro de muestra
+
+Los siguientes estadísticos fueron tomados en cuenta para evaluar si los modelos observan un buen pronóstico dentro de muestra, considerando un modelo ARIMA con un t&#233;rmino de error igual a $\varepsilon_t=Y_t-\hat Y_t$:
+
+- Error promedio (ME)
+
+$ME=\sum_{t=1}^T\varepsilon_t$
+
+- Raíz del Error Cuadrático Medio (RMSE)
+
+$RMSE=\sqrt{\frac{\sum_{t=1}^T\varepsilon_t^2}{T}}$
+
+- Error Absoluto Medio (MAE)
+
+$MAE=\frac{\sum_{t=1}^T|\varepsilon_t|}{T}$
+
+- Error Porcentual Medio (MPE)
+
+$MPE=\frac{100\%}{T}\sum_{t=1}^T\frac{Y_t-\hat Y_t}{Y_t}$
+
+- Error Absoluto Porcentual Medio (MAPE)
+
+$MAPE=\frac{100\%}{T}\sum_{t=1}^T\bigg |\frac{Y_t-\hat Y_t}{Y_t}\bigg |$
+
+- Error Absoluto Escalado Medio (MASE)
+
+$MASE=\frac{\frac{1}{J}\sum_j|\varepsilon_j|}{\frac{1}{T-1}\sum_{t=2}^T\bigg|Y_t-Y_{t-1}\bigg|}$
+
+```{r, comment="", warning=F, message=F, echo=F} 
+evalResids <- rbind(evalResids_ar1,evalResids_Auto,
+                    evalResids_ArimaDummy,evalResids_ArimaX)
+evalResids[,2:8] <- round(evalResids[,2:8],6)
+kable(evalResids,
+      caption = "Evaluaci\u00F3n de Residuales: Pronóstico dentro de Muestra") %>%
+  kable_styling(c("striped", "bordered")) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+En la tabla puede observarse que el modelo que tiene los menores valores de los estadísticos (mejor modelo) es el que incluye como regresores las dummies y GDP.
+
+## 7) Resultado de pron&#243;stico dentro de muestra
+
+Se etima el modelo con menor RMSE usando ventanas expandibles (rolling windows) con datos pasados (primer trimestre 2004 a &#250;ltimo trimestre 2019) y produciendo un pron&#243;stico ("pseudo-out-of Sample"). Esta es una manera de mostrar la eficiencia del pron&#243;stico con datos observados^[Para estos resultados se omite la inclusi&#243;n de las dummies dentro del RegArima].
+
+```{r, comment="", warning=F, message=F, echo=F} 
+##### Evaluando pronostico dentro de muestra, 4 trimestres
+horizon = 4
+AllFcst = HistYoY
+startSeries = ts_start(dPIB_HN)
+for(smpEnd in seq(as.Date("2004-01-01"), as.Date("2019-04-01"), by = "quarter")){
+  x = ts_span(dPIB_HN, NULL, as.Date(smpEnd))
+  xregres = ts_span(ts_c(dGDP_USA), NULL, as.Date(smpEnd))
+  refit = Arima(x, xreg = xregres, order = c(2, 0, 1), include.constant = T)
+  start.date = as.Date(smpEnd + 31 * 3)
+  end.date = as.Date(smpEnd + 31 * 3 * horizon)
+  xregres = dGDP_USA[paste(start.date,end.date,sep="::")]
+  fcst = forecast(refit, xreg = xregres, h = horizon)
+  temp1 = rbind(as.matrix(fcst$x), as.matrix(fcst$mean))
+  temp1b = xts(temp1, order.by = seq(startSeries, length.out= length(temp1), by = "quarter"))
+  temp1b[1] = 0
+  temp2 = exp(ts_cumsum(temp1b))
+  temp3 = ts_pcy(temp2)
+  fcst = ts_span(temp3, as.Date(smpEnd), NULL)
+  AllFcst = ts_c(AllFcst, fcst)
+}
+AllFcst = ts_span(AllFcst, "2000-01-01", "2019-10-01")
+df = data.frame(as.Date(index(ts_span(ts_xts(HistYoY), "2000-01-01"))), AllFcst)
+colnames(df)[1] = "Date"
+meltdf <- reshape2::melt(df,id="Date")
+p = ggplot(meltdf,aes(x=Date, 
+                      y=value, 
+                      colour=variable, 
+                      group=variable)) +
+  geom_line() +
+  theme_minimal() +
+  theme(legend.position="none") +
+  geom_hline(yintercept=4, linetype="solid", color = "black") +
+  geom_hline(yintercept=3, linetype="dashed", color = "black") +
+  geom_hline(yintercept=5, linetype="dashed", color = "black") +
+  ggtitle("Pron\u00F3stico de inflaci\u00F3n dentro de muestra: 4 trimestres") + 
+  theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank())
+
+if(getOutputFormat() == 'html_document') {
+  ggplotly(p)  %>%
+    layout(title = "Pron\u00F3stico de inflaci\u00F3n dentro de muestra: 4 Trimestres",
+           xaxis = list(title = ""),
+           yaxis = list (title = "%"))
+ } else {
+  p
+}
+```
+
+## 8) Fan chart de la inflaci&#243;n
+
+Este ejercicio implica la construcci&#243;n de un modelo de pron&#243;stico y evaluaci&#243;n mediante fanchart. Adicionalmente, se calcula la probabilidad de eventos particulares utilizando simulaci&#243;n de Montecarlo.
+
+### 8.1) Estimación de un modelo ARMA y fan chart
+
+Se estima el modelo en diferencias logar&#237;tmicas. Alternativamente, se puede estimar en tasas de crecimiento interanual (ts_pc). Note que la función autoplot autom&#225;ticamente produce un intervalo de pron&#243;stico. Podemos especificar manualmente las probabilidades que queremos cubrir (la opci&#243;n de niveles).
+
+Con el fin de simular un impacto por el efecto del COVID-19 durante 2020, se realiza un pron&#243;stico asumiendo una ca&#237;da de la variable GDP de 0.5% en cada trimestre de este a&#241;o, adicional a un impacto esperado de la econom&#237;a interna similar a los dos primeros trimestres de 2009 (`D09a = D09b = 1`); adicionalmente, para 2021 se asume un crecimiento trimestral de GDP para 2021 de 0.25% (1% anual) y que la econom&#237;a interna vuelva a sus niveles de producci&#243;n normales (`D09a = D09b = 0`).
+
+```{r, comment="", warning=F, message=F, echo=F} 
+dPIB_HN <- 100*ts_diff(log(PIB_HN))
+ModelTest = Arima(dPIB_HN, order = c(2, 0, 1), include.constant= TRUE,
+                     xreg = ts_c(dGDP_USA, D09a, D09b))
+inicio <- "2020-01-01"
+fin <- "2021-10-01"
+dates_for <- seq(as.Date(inicio), as.Date(fin), by = "quarter")
+dGDP_USA <- data.frame(dates_for, dGDP_USA = c(rep(-0.005,4),rep(0.0025, 4)))
+dGDP_USA = xts::xts(dGDP_USA[, 2], order.by = dates_for)
+D09a = data.frame(dates_for, D09a = c(rep(1, 4),rep(0, 4)))
+D09b = data.frame(dates_for, D09b = c(rep(1, 4),rep(0, 4)))
+xregres = ts_span(ts_c(dGDP_USA, D09a, D09b), NULL, as.Date(fin))
+
+fcstPIB_HN = forecast(ModelTest, xreg = xregres, h = 8, level = c(50, 70, 80, 95))
+IntervalRange = fcstPIB_HN$upper-fcstPIB_HN$lower
+colnames(IntervalRange) = c("50%", "70%", "80%", "95%")
+
+if(getOutputFormat() == 'html_document') {
+  dfHist <- data.frame(date=as.Date(time(dPIB_HN)), HistYoY=as.matrix(dPIB_HN))
+  dfMid <- data.frame(date=as.Date(time(fcstPIB_HN$mean)), AutoFcstYoY=as.matrix(fcstPIB_HN$mean))
+  dfLow <- data.frame(date=as.Date(time(fcstPIB_HN$lower)), AutoFcstYoY=as.matrix(fcstPIB_HN$lower))
+  dfUp <- data.frame(date=as.Date(time(fcstPIB_HN$upper)), AutoFcstYoY=as.matrix(fcstPIB_HN$upper))
+  df <- as.data.frame(merge(dfHist, dfMid, all.x = TRUE, all.y = TRUE, by="date"))
+  df <- as.data.frame(merge(df, dfLow, all.x = TRUE, all.y = TRUE, by="date"))
+  df <- as.data.frame(merge(df, dfUp, all.x = TRUE, all.y = TRUE, by="date"))
+  names(df) <- c("date","HistYoY","Mean","low50","low70","low80","low95","up50","up70","up80","up95")
+  plot_ly(df, x = ~date, y = ~HistYoY, name = 'Observado', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~Mean, name = 'Mean', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~low50, name = 'low50', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~low70, name = 'low70', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~up50, name = 'up50', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~up70, name = 'up70', type = 'scatter', mode = 'lines') %>%
+    layout(title = list(text = paste0('PIB Honduras: Pron\u00F3stico ARIMA, 
+                                      fanchart modelo con Regresores',
+                                      '<br>',
+                                      '<sup>',
+                                      'Variaci\u00F3n interanual')),
+           xaxis = list(title = ""),
+           yaxis = list (title = "%"))
+ } else {
+  autoplot(fcstPIB_HN) +
+    theme_minimal() +
+    theme(text=element_text(size=8))
+ }
+kable(fcstPIB_HN)
+```
+
+**Interpretaci&#243;n:** El gr&#225;fico muestra la media de pron&#243;stico (l&#237;nea s&#243;lida) y el intervalo de pron&#243;stico. Los n&#250;meros asociados con el intervalo de pron&#243;stico representan la cobertura. Los intervalos representan una medida de la confianza que tenemos en el pron&#243;stico: si son muy grandes, el pron&#243;stico puntual no es muy exacto y vice versa.
+
+Aunque es dif&#237;cil de observar en muestras cortas, el intervalo de pron&#243;stico se agranda para horizontes m&#225;s largos (debido a que la varianza del error de pron&#243;stico también se incrementa). 
+
+### 8.2) Calcular la varianza del error de pron&#243;stico VEP y simular la densidad de pron&#243;stico
+
+#### a) Extraer la varianza del error de pron&#243;stico y comparar con la varianza incondicional
+
+Esta es una funci&#243;n &#250;til para calcular la varianza del error de pron&#243;stico asumiendo que dichos errores est&#225;n normalmente distribuidos.
+
+```{r, comment="", warning=F, message=F, echo=F} 
+sigh2 = getForecastVariance(fcstPIB_HN)
+autoplot(sigh2) +
+  theme_minimal() + 
+  geom_hline(yintercept=var(dPIB_HN, na.rm = T), linetype="dashed") +
+  ggtitle("Varianza del error de pron\u00F3stico y varianza incondicional")
+```
+
+#### b) Simular la densidad de pron&#243;stico y comparar con el intervalo de pron&#243;stico anal&#237;tico obtenido
+
+Se realiza una simulaci&#243;n de la densidad de pron&#243;stico asumiendo que el error de pron&#243;stico est&#225; distribuido como una normal. Esto implica que $y_{t+h} \thicksim N(y_{t+h|t}, sigh^2)$, esto es, el valor futuro del crecimiento del PIB est&#225; distribuido como una normal con media igual al pron&#243;stico puntual y varianza igual a la varianza del error de pron&#243;stico.
+
+```{r, comment="", warning=F, message=F, echo=F} 
+NSim = 100
+fcsth = fcstPIB_HN$mean
+SimFcst = matrix(NA, nrow = 8, ncol = NSim)
+for (h in 1:8){
+  SimFcst[h, ] = rnorm(NSim, fcsth[h], sqrt(sigh2[h]))
+}
+SimFcst = xts(SimFcst, order.by = as.Date(index(ts_xts(fcsth))))
+```
+
+Podemos graficar las simulaciones. Cada l&#237;nea es un posible resultado. El promedio ser&#225; igual a la media de pronóstico y podemos calcular percentiles que sean iguales a los intervalos de pron&#243;stico.
+
+```{r, comment="", warning=F, message=F, echo=F} 
+plot(SimFcst)
+ci95 =t(apply(SimFcst, 1, quantile, probs = c(0.025, 0.975),  na.rm = TRUE) )
+ci95 = xts(ci95, order.by = as.Date(index(ts_xts(fcsth))))
+
+allci = ts_c(ci95,fcstPIB_HN$lower[, "95%"], fcstPIB_HN$upper[, "95%"])
+plot(allci)
+```
+
+#### c) Calcular probabilidad de crecimiento dentro de un rango del PIB en Q1 2020
+
+La ventaja real de sumular la incertidumbre del pron&#243;stico es que podemos f&#225;cilmente computar la probabilidad de eventos particulares.
+
+```{r, comment="", warning=F, message=F, echo=F} 
+# Probabilidad de crecimiento menor o igual a -2% en el primer trimestre de 2020
+(PNeg2020 = mean(SimFcst["2020-01-01",] <= -2))
+
+# Probabilidad de crecimiento del PIB menor a -4% in Q1 2020
+(PLarge2020 = mean(SimFcst["2020-01-01",] <= -4))
+
+# Probailidad de crecimiento del PIB entre -2% y -4% in Q1 2020
+(PBetween2020 = mean(SimFcst["2020-01-01",] <= -2 & SimFcst["2020-01-01",] >= -4))
+
+# Graficar barras
+PNeg = ts_rowMeans(SimFcst <= -2)
+PLarge = ts_rowMeans(SimFcst <= -4)
+PBetween = ts_rowMeans(SimFcst <= -2 & SimFcst >= -4)
+
+prob.data = data.frame(index(PNeg), PNeg, PLarge, PBetween)
+colnames(prob.data) = c("Date", "<= -2%", "<= -4%", "entre -2% y -4%")
+prob.data <- melt(prob.data,id.vars = "Date") 
+names(prob.data) <- c("Date","Rangos","Valor")
+p <- ggplot(prob.data, aes(x = Date, y = Valor, fill=Rangos)) +
+  geom_bar(stat='identity') +
+  theme_minimal() +
+  ggtitle("Probabilidades de Crecimientos Trimestrales por Rangos")
+
+if(getOutputFormat() == 'html_document') {
+  ggplotly(p)
+ } else {
+  p
+}
+```
+
+#### d) Probabilidad que el crecimiento anual del PIB en 2020 sea menor a 5%
+
+Paso 1: Calcular el nivel para cada simulación y agregarlo a una frecuencia anual
+
+```{r, comment="", warning=F, message=F, echo=F} 
+# Paso 1: Calcular el nivel para cada simulacion y agregarlo a una frecuencia anual
+for (s in 1:NSim){
+  # Agregar datos historicos al pronostico
+  temp = ts_bind(dPIB_HN, SimFcst[,s])
+  temp[1] = 0
+  # Cumulative sum of log-differences divided by 100
+  temp = ts_cumsum(temp)#/100)
+  # Calculate exponential of series
+  temp = exp(temp/100)
+  # Aggregate to annual frequency
+  temp = ts_frequency(temp, to ="year", aggregate="sum")
+  # Calculate growth rates of annual series
+  temp = ts_pc(temp)
+  # Save result in collection of time series
+  if (s == 1){
+    SimFcstGrt = temp
+  } else {
+    SimFcstGrt = ts_c(SimFcstGrt, temp)
+  }
+}
+```
+
+Paso 2: Calcular la probabilidad
+
+```{r, comment="", warning=F, message=F, echo=F} 
+# Step 2: Calculate the probability
+p2020 = mean(SimFcstGrt["2020-01-01",] <= -5)
+p2021 = mean(SimFcstGrt["2021-01-01",] <= -5)
+
+# Plot some interval forecasts for annual CPI growth
+ci95 = as.xts(t(apply(SimFcstGrt, 1, quantile, probs = c(0.025, .5, 0.975),  na.rm = TRUE) ))
+
+
+df <- data.frame(date=as.Date(time(ci95)), HistYoY=as.matrix(ci95))
+rownames(df) <- c()
+names(df) <- c("date","Min","Mediana","Max")
+
+if(getOutputFormat() == 'html_document') {
+  plot_ly(df, x = ~date, y = ~Min, name = 'Min', type = 'scatter', mode = 'lines') %>%
+    add_trace(x = ~date, y = ~Mediana, name = 'Mediana', type = 'scatter', mode = 'lines', fill = 'tonexty') %>%
+    add_trace(x = ~date, y = ~Max, name = 'Max', type = 'scatter', mode = 'lines', fill = 'tonexty') %>%
+    layout(title = list(text = paste0('PIB Honduras: Pron\u00F3stico ARIMA, Fanchart modelo RegArima',
+                                      '<br>',
+                                      '<sup>',
+                                      'Variaci\u00F3n anual')),
+           xaxis = list(title = ""),
+           yaxis = list (title = "%"))
+ } else {
+  ts_plot(
+    `Superior` = ci95[,"97.5%"],
+    `Mediana` = ci95[,"50%"],
+    `Inferior` = ci95[,"2.5%"],
+    `PIB`= SimFcstGrt["1981-01-01/2021-12-01",1],
+    title = "PIB Honduras",
+    subtitle = "Tasa de crecimiento anual"
+  )
+}
+```
+
+Los resultados indican que la probabilidad que la tasa de crecimiento anual del PIB sea menor a -5% a finales de 2020 es `r round(p2020*100,1)`% y para 2021 de `r round(p2021*100,1)`%
+
+# Anexos
+
+Los Anexos 1 y 2 se basan en Pyndick & Rubinfeld (2001), cap&#237;tulo 16, pg.515 en adelante.
+
+## Anexo 1: Caminata aleatoria
+
+El ejemplo m&#225;s simple de una serie de tiempo estoc&#225;stica es el proceso de caminata aleatoria; en este proceso, cada cambio sucesivo en $y_t$ es extra&#237;do en forma independiente de una distribuci&#243;n de probabilidad con media cero. Por tanto, $y_t$ est&#225; determinado por
+
+\begin{equation}
+\tag{A1.1}
+\label{eqn:A1.1}
+Y_t=Y_{t-1}+\varepsilon_t
+\end{equation}
+
+con $E(\varepsilon_t)=0$ y $E(\varepsilon_t,\varepsilon_s)=0$ para $t\neq s$
+
+Consideremos el caso en el que se requiere un pron&#243;stico para un proceso de caminata aleatoria. El pronóstico est&#225; dado por
+
+\begin{equation}
+\tag{A1.2}
+\label{eqn:A1.2}
+\hat Y_{T+1}=E(Y_{T+1}|Y_T,\dots,Y_1)=Y_T+E(\varepsilon_{T+1})=Y_T
+\end{equation}
+
+El pron&#243;stico dos per&#237;odos adelante es:
+
+\begin{equation}
+\tag{A1.3}
+\label{eqn:A1.3}
+\hat Y_{T+2}=E(Y_{T+2}|Y_T,\dots,Y_1)=E(Y_{T+1}+\varepsilon_{T+2})=E(Y_{T}+\varepsilon_{T+1}+\varepsilon_{T+2})=Y_t
+\end{equation}
+
+Del mismo modo, el pron&#243;stico $l$ periodos adelante tambi&#233;n es $Y_T$.
+
+Aunque el pron&#243;stico $\hat Y_{T+1}$ ser&#225; el mismo sin importar cu&#225;n grande sea $l$, la varianza del error de pron&#243;stico crecer&#225; conforme $l$ se haga mayor. Para un periodo el error de pron&#243;stico est&#225; dado por:
+
+\begin{equation}
+\tag{A1.4}
+\label{eqn:A1.4}
+e_1=Y_{T+1}-\hat Y_{T+1}=Y_T+\varepsilon_{T+1}-Y_t=\varepsilon_{T+1}
+\end{equation}
+
+y su varianza es $E(\varepsilon^2_{T+1})=\sigma^2_{\varepsilon}$. Para el pron&#243;stico de dos periodos
+
+\begin{equation}
+\tag{A1.5}
+\label{eqn:A1.5}
+e_2=Y_{T+2}-\hat Y_{T+2}=Y_T+\varepsilon_{T+1}+\varepsilon_{T+2}-Y_t=\varepsilon_{T+1}+\varepsilon_{T+2}
+\end{equation}
+
+y su varianza es:
+
+\begin{equation}
+\tag{A1.6}
+\label{eqn:A1.6}
+E[(\varepsilon_{T+1}+\varepsilon_{T+2})^2]=E(\varepsilon_{T+1}^2)+E(\varepsilon_{T+2}^2)+2E(\varepsilon_{T+1}\varepsilon_{T+2})
+\end{equation}
+
+Dado que $\varepsilon_{T+1}$ y $\varepsilon_{T+2}$ son independientes, el tercer t&#233;rmino de la ecuaci&#243;n $\eqref{eqn:A1.6}$ es cero y la varianza del error es $2\sigma_{\varepsilon}^2$. De igual forma, para el pron&#243;stico del periodo $l$, la varianza del error es $l\sigma^2_{\varepsilon}$. Así, el *error est&#225;ndar del pronóstico* se incrementa con la ra&#237;z cuadrada de $l$. Por tanto se pueden obtener *intervalos de confianza* para nuestros pron&#243;sticos y estos intervalos se volver&#225;n m&#225;s amplios conforme se incremente el horizonte del pron&#243;stico.
+
+## Anexo 2: Criterio ADF
+
+Suponga que creemos que una variable $Y_t$, la cual ha estado creciendo con el tiempo, puede describirse por la siguiente ecuaci&#243;n:
+
+\begin{equation}
+\tag{A2.1}
+\label{eqn:A2.1}
+Y_t=\alpha+\beta\cdot t+\rho\cdot Y_{t-1}+\varepsilon_t
+\end{equation}
+
+Una posibilidad es que $Y_t$ ha estado creciendo debido a que tiene una tendencia positiva ($\beta_1>0$) pero ser&#237;a estacionaria despu&#233;s de eliminar la tendencia (es decir, $\rho < 1$).
+
+Otra posibilidad es que $Y_t$ ha estado creciendo debido a que sigue una caminata aleatoria con un rumbo positivo (es decir, $\alpha>0$, $\beta=0$ y $\rho=1$); en este caso trabajamos con $\Delta Y_t$.
+
+La eliminaci&#243;n de la tendencia no har&#237;a estacionaria la serie y la inclusi&#243;n de $Y_t$ en una regresión (a&#250;n si se elimina la tendencia) podr&#237;a conducir a resultados imprecisos.
+
+Podriamos pensar que la ecuaci&#243;n $\eqref{eqn:A2.1}$ pudiera ser estimada con OLS y que la estad&#237;stica $t$ en $\hat\rho$ se puede usar para probar si $\hat\rho$ es significativamente diferente de 1. Sin embargo, si el valor verdadero de $\rho$ en efecto es 1, el estimador OLS est&#225; sesgado hacia cero. Por tanto, al usar OLS de esta manera puede conducirnos a rechazar incorrectamente la hip&#243;tesis de la caminata aleatoria.
+
+Dickey y Fuller derivaron la distribuci&#243;n para el estimador $\hat\rho$ que se cumple cuando $\rho=1$ y generaron estad&#237;sticas para una prueba F simple de la hip&#243;tesis de caminata aleatoria; es decir, la hip&#243;tesis de que $\beta=0$ y $\rho=1$. Suponga que $Y_t$ puede describirse con la ecuaci&#243;n $\eqref{eqn:A2.1}$ 
+
+Usando OLS, ejecutamos primero la regresi&#243;n sin restricci&#243;n
+
+\begin{equation}
+\tag{A2.2}
+\label{eqn:A2.2}
+Y_t-Y_{t-1}=\alpha+\beta\cdot t+(\rho-1)\cdot Y_{t-1} +\varepsilon_t
+\end{equation}
+
+y luego la regresi&#243;n restringida
+
+\begin{equation}
+\tag{A2.3}
+\label{eqn:A2.3}
+Y_t-Y_{t-1}=\alpha
+\end{equation}
+
+Luego calculamos la raz&#243;n F est&#225;ndar^[$F=\frac{(N-k)(ESS_R-ESS_{UR})}{q(ESS_{UR})}$], donde $ESS_R$ y $ESS_{UR}$ son las sumas de cuadrados de los residuales en las regresiones restringida y sin restricciones, respectivamente, $N$ es el n&#250;mero de observaciones, $k$ es el n&#250;mero de par&#225;metros estimados en la regresi&#243;n sin restriccion y $q$ es el n&#250;mero de restricciones de par&#225;metro) para probar si las restricciones ($\beta=0$, $\rho=1$) se cumplen; esta raz&#243;n no est&#225; distribuida como una distribuci&#243;n F est&#225;ndar bajo la hip&#243;tesis nula, de acuerdo con la distribuci&#243;n calculada por Dickey y Fuller, los valores cr&#237;ticos son mucho mayores que los de la tabla F est&#225;ndar.
+
+Un problema con la ecuaci&#243;n $\eqref{eqn:A2.1}$ es que hace la suposici&#243;n implícita de que no hay correlaci&#243;n serial de ninguna clase en el t&#233;rmino de error $\varepsilon_t$. Nos gustar&#237;a permitir, con frecuencia, una correlaci&#243;n serial en $\varepsilon_t$ y todav&#237;a probar por una ra&#237;z unitaria. Esto puede hacerse con la prueba de Dickey-Fuller aumentada. Esta prueba se lleva a cabo expandiendo la ecuaci&#243;n $\eqref{eqn:A2.1}$ para incluir cambios rezagados en $Y_t$ en el lado derecho de la ecuaci&#243;n:
+
+\begin{equation}
+\tag{A2.4}
+\label{eqn:A2.4}
+Y_t=\alpha+\beta\cdot t+\rho\cdot Y_{t-1}+\sum_{j=1}^p\lambda_j\Delta Y_{t-j}+\varepsilon_t
+\end{equation}
+
+donde $\Delta Y_t=Y_t-Y_{t-1}$.
+
+La prueba de ra&#237;z unitaria se realiza as&#237;:
+
+Usando OLS, primero se ejecuta la regresi&#243;n sin restricci&#243;n
+
+\begin{equation}
+\tag{A2.5}
+\label{eqn:A2.5}
+Y_t-Y_{t-1}=\alpha+\beta\cdot t+(\rho-1)\cdot Y_{t-1}+\sum_{j=1}^p\lambda_j\Delta Y_{t-j}
+\end{equation}
+
+y luego la regresi&#243;n restringida
+
+\begin{equation}
+\tag{A2.6}
+\label{eqn:A2.6}
+Y_t-Y_{t-1}=\alpha+\sum_{j=1}^p\lambda_j\Delta Y_{t-j}
+\end{equation}
+
+Entonces, se calcula una raz&#243;n F est&#225;ndar para probar si se cumplen las restricciones ($\beta=0$, $\rho=1$). Una vez m&#225;s, debemos usar la distribuci&#243;n tabulada por Dickey y Fuller.
+
+Debe tomarse en cuenta que la prueba ADF solo nos permite rechazar (o dejar de rechazar) la hip&#243;tesis de que una variable *no* es una caminata aleatoria. Una falla en rechazar (en especial en un nivel de significancia alto) solo proporcina una evidencia d&#233;bil a favor de la hip&#243;tesis de la caminata aleatoria.
+
+## Anexo 3: Referencias
+
+<https://www.rapidtables.com/code/text/unicode-characters.html>
+
+<https://www.andrewheiss.com/blog/2018/03/08/amelia-broom-huxtable/>
+
+<http://haozhu233.github.io/kableExtra/awesome_table_in_html.html>
+
+<https://plotly-r.com/plotly_book.pdf>
+
+<https://bookdown.org/yihui/rmarkdown/>
+
+Hayashi, F., "Econometrics", First Ed., Princeton University Press, 2000.
+
+Pindyck, RS, Rubinfeld, D., "Econometr&#237;a Modelos y Pron&#243;sticos", 4ta. Ed., McGraw-Hill, 2001.
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+```{r, comment="", warning=F, message=F, echo=F} 
+
+```
+
+
+
+
+
+
