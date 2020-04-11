@@ -601,14 +601,14 @@ p = ggplot(meltdf,aes(x=Date,
   geom_hline(yintercept=4, linetype="solid", color = "black") +
   geom_hline(yintercept=3, linetype="dashed", color = "black") +
   geom_hline(yintercept=5, linetype="dashed", color = "black") +
-  ggtitle("Pron\u00F3stico de inflaci\u00F3n dentro de muestra: 4 trimestres") + 
+  ggtitle("Pron\u00F3stico de PIB Trimestral dentro de muestra: 4 trimestres") + 
   theme(
   axis.title.x = element_blank(),
   axis.title.y = element_blank())
 
 if(getOutputFormat() == 'html_document') {
   ggplotly(p)  %>%
-    layout(title = "Pron\u00F3stico de inflaci\u00F3n dentro de muestra: 4 Trimestres",
+    layout(title = "Pron\u00F3stico de PIB Trimestral dentro de muestra: 4 Trimestres",
            xaxis = list(title = ""),
            yaxis = list (title = "%"))
  } else {
@@ -616,7 +616,7 @@ if(getOutputFormat() == 'html_document') {
 }
 ```
 
-## 8) Fan chart de la inflaci&#243;n
+## 8) Fan chart de PIB Trimestral
 
 Este ejercicio implica la construcci&#243;n de un modelo de pron&#243;stico y evaluaci&#243;n mediante fanchart. Adicionalmente, se calcula la probabilidad de eventos particulares utilizando simulaci&#243;n de Montecarlo.
 
