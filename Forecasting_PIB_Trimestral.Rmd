@@ -185,7 +185,9 @@ table_stats(Model_ar1, caption = "Estad\u00EDsticos del ARIMA(1,0,0)") %>%
 stats_ar1 <- cbind(data.frame(Model = "ar1"), stats)
 ```
 
-Puede verse que solamente la constante es estad&#237;sticamente significativa.^[Evaluating forecast accuracy](https://otexts.com/fpp2/accuracy.html)].
+Puede verse que solamente la constante es estad&#237;sticamente significativa.^[[Evaluating forecast accuracy](https://otexts.com/fpp2/accuracy.html)].
+
+\pagebreak
 
 #### ARIMA(1,0,0): An&#225;lisis de los residuales
 
@@ -205,6 +207,8 @@ jarque.bera.test(Model_ar1$residuals[!is.na(Model_ar1$residuals)])
 ```
 
 Tanto la prueba de Ljung-Box como la de Box-Ljung muestran que los residuos del modelo ARIMA(1,0,0) no tienen autocorrelaci&#243;n. Adicionalmente, la prueba de Jarque-Bera implica normalidad en los residuos.
+
+\pagebreak
 
 #### ARIMA(1,0,0): Pron&#243;stico fuera de muestra
 
@@ -280,7 +284,7 @@ En los ejercicios siguientes, se trata de seleccionar el orden de los rezagos co
 
 ### b) Procedimiento autom&#225;tico para seleccionar el modelo de pron&#243;stico
 
-Una estrategia similar para seleccionar un modelo de pron&#243;stico es mediante el uso de la funci&#243;n `auto.arima`. Esta funci&#243;n selecciona autom&#225;ticamente el modelo de acuerdo con alg&#250;n criterio. En este ejemplo se usa el AIC.^[Algunas veces esta selecci&#243;n autom&#225;tica con AIC proporciona resultados inconsistentes.]
+Una estrategia para seleccionar un modelo de pron&#243;stico es mediante el uso de la funci&#243;n `auto.arima`. Esta funci&#243;n selecciona autom&#225;ticamente el modelo de acuerdo con alg&#250;n criterio. En este ejemplo se usa el AIC.^[Algunas veces esta selecci&#243;n autom&#225;tica con AIC proporciona resultados inconsistentes.]
 
 #### ARIMA autom&#225;tico: Evaluaci&#243;n de los coeficientes
 
@@ -396,6 +400,8 @@ kable(dfFor_Auto,
 
 Los resultados del modelo autom&#225;tico son bastante similares a los del modelo ARIMA(1,0,0). Puede observarse que, en todos los casos, los resultados de pron&#243;stico fuera de muestra para un per&#237;odo mayor a seis meses convergen hacia valores similares a la media hist&#243;rica, por tanto los mismos no son eficientes si se toman en cuenta los &#250;ltimos datos observados y tambi&#233;n si se muestra que la serie puede ser explicada por un proceso m&#225;s determin&#237;stico, evaluando variables explicativas como posibles regresores.
 
+\pagebreak
+
 ## 5) Extensi&#243;n del modelo
 
 ### a) Control por dummies
@@ -404,7 +410,7 @@ Con el fin de que la media de los errores en el procedimiento autom&#225;tico no
 
 - Primer trimestre 2009 (D09a);
 
-- Segundo trimestre 2009 (D09a);
+- Segundo trimestre 2009 (D09b);
 
 ```{r, comment="", warning=F, message=F, echo=F} 
 D <- ts_xts(dPIB_HN)
@@ -601,14 +607,14 @@ p = ggplot(meltdf,aes(x=Date,
   geom_hline(yintercept=4, linetype="solid", color = "black") +
   geom_hline(yintercept=3, linetype="dashed", color = "black") +
   geom_hline(yintercept=5, linetype="dashed", color = "black") +
-  ggtitle("Pron\u00F3stico de PIB Trimestral dentro de muestra: 4 trimestres") + 
+  ggtitle("Pron\u00F3stico de PIB dentro de muestra: 4 trimestres") + 
   theme(
   axis.title.x = element_blank(),
   axis.title.y = element_blank())
 
 if(getOutputFormat() == 'html_document') {
   ggplotly(p)  %>%
-    layout(title = "Pron\u00F3stico de PIB Trimestral dentro de muestra: 4 Trimestres",
+    layout(title = "Pron\u00F3stico de PIB dentro de muestra: 4 Trimestres",
            xaxis = list(title = ""),
            yaxis = list (title = "%"))
  } else {
@@ -616,7 +622,7 @@ if(getOutputFormat() == 'html_document') {
 }
 ```
 
-## 8) Fan chart de PIB Trimestral
+## 8) Fan chart de PIB
 
 Este ejercicio implica la construcci&#243;n de un modelo de pron&#243;stico y evaluaci&#243;n mediante fanchart. Adicionalmente, se calcula la probabilidad de eventos particulares utilizando simulaci&#243;n de Montecarlo.
 
@@ -624,7 +630,7 @@ Este ejercicio implica la construcci&#243;n de un modelo de pron&#243;stico y ev
 
 Se estima el modelo en diferencias logar&#237;tmicas. Alternativamente, se puede estimar en tasas de crecimiento interanual (ts_pc). Note que la función autoplot autom&#225;ticamente produce un intervalo de pron&#243;stico. Podemos especificar manualmente las probabilidades que queremos cubrir (la opci&#243;n de niveles).
 
-Con el fin de simular un impacto por el efecto del COVID-19 durante 2020, se realiza un pron&#243;stico asumiendo una ca&#237;da de la variable GDP de 0.5% en cada trimestre de este a&#241;o, adicional a un impacto esperado de la econom&#237;a interna similar a los dos primeros trimestres de 2009 (`D09a = D09b = 1`); adicionalmente, para 2021 se asume un crecimiento trimestral de GDP para 2021 de 0.25% (1% anual) y que la econom&#237;a interna vuelva a sus niveles de producci&#243;n normales (`D09a = D09b = 0`).
+Con el fin de simular un impacto por el efecto del COVID-19 durante 2020, se realiza un pron&#243;stico asumiendo comportamiento de GDP tomando en cuenta el dato del [World Economic Outlook](https://www.imf.org/en/Publications/WEO) del Fondo Monetario Internacional (FMI), adicional a un impacto esperado de la econom&#237;a interna similar a los dos primeros trimestres de 2009 (`D09a = D09b = 1`) del segundo al tercer trimestre de 2019 (asumiendo que en estos se espera el mayor impacto econ&#243;mico); adicionalmente, para 2021 se asume un crecimiento trimestral de GDP para 2021 de 1.175% (4.7% anual) y que la econom&#237;a interna vuelva a sus niveles de producci&#243;n normales (`D09a = D09b = 0`).
 
 ```{r, comment="", warning=F, message=F, echo=F} 
 dPIB_HN <- 100*ts_diff(log(PIB_HN))
@@ -633,10 +639,10 @@ ModelTest = Arima(dPIB_HN, order = c(2, 0, 1), include.constant= TRUE,
 inicio <- "2020-01-01"
 fin <- "2021-10-01"
 dates_for <- seq(as.Date(inicio), as.Date(fin), by = "quarter")
-dGDP_USA <- data.frame(dates_for, dGDP_USA = c(rep(-0.005,4),rep(0.0025, 4)))
+dGDP_USA <- data.frame(dates_for, dGDP_USA = c(-0.0424,-0.1,0.0575,0.0325,rep(0.01175, 4)))
 dGDP_USA = xts::xts(dGDP_USA[, 2], order.by = dates_for)
-D09a = data.frame(dates_for, D09a = c(rep(1, 4),rep(0, 4)))
-D09b = data.frame(dates_for, D09b = c(rep(1, 4),rep(0, 4)))
+D09a = data.frame(dates_for, D09a = c(0,rep(1, 2),0,rep(0, 4)))
+D09b = data.frame(dates_for, D09b = c(0,rep(1, 2),0,rep(0, 4)))
 xregres = ts_span(ts_c(dGDP_USA, D09a, D09b), NULL, as.Date(fin))
 
 fcstPIB_HN = forecast(ModelTest, xreg = xregres, h = 8, level = c(50, 70, 80, 95))
@@ -711,24 +717,27 @@ Podemos graficar las simulaciones. Cada l&#237;nea es un posible resultado. El p
 plot(SimFcst)
 ci95 =t(apply(SimFcst, 1, quantile, probs = c(0.025, 0.975),  na.rm = TRUE) )
 ci95 = xts(ci95, order.by = as.Date(index(ts_xts(fcsth))))
+```
 
+```{r, comment="", warning=F, message=F, echo=F} 
 allci = ts_c(ci95,fcstPIB_HN$lower[, "95%"], fcstPIB_HN$upper[, "95%"])
 plot(allci)
 ```
 
-#### c) Calcular probabilidad de crecimiento dentro de un rango del PIB en Q1 2020
+#### c) Calcular probabilidad de crecimiento dentro de un rango del PIB en Q2 2020
 
-La ventaja real de sumular la incertidumbre del pron&#243;stico es que podemos f&#225;cilmente computar la probabilidad de eventos particulares.
+La ventaja de sumular la incertidumbre del pron&#243;stico es que podemos estimar la probabilidad de eventos particulares.
 
 ```{r, comment="", warning=F, message=F, echo=F} 
 # Probabilidad de crecimiento menor o igual a -2% en el primer trimestre de 2020
-(PNeg2020 = mean(SimFcst["2020-01-01",] <= -2))
+(paste0("Probabilidad de crecimiento menor a -2% en 2020q1: ",PNeg2020 = mean(SimFcst["2020-01-01",] <= -2)))
 
 # Probabilidad de crecimiento del PIB menor a -4% in Q1 2020
-(PLarge2020 = mean(SimFcst["2020-01-01",] <= -4))
+(paste0("Probabilidad de crecimiento menor a -4% en 2020q1: ",PLarge2020 = mean(SimFcst["2020-01-01",] <= -4)))
 
 # Probailidad de crecimiento del PIB entre -2% y -4% in Q1 2020
-(PBetween2020 = mean(SimFcst["2020-01-01",] <= -2 & SimFcst["2020-01-01",] >= -4))
+(paste0("Probabilidad de crecimiento entre -4% y -2% en 2020q1: ",
+        PBetween2020 = mean(SimFcst["2020-01-01",] <= -2 & SimFcst["2020-01-01",] >= -4)))
 
 # Graficar barras
 PNeg = ts_rowMeans(SimFcst <= -2)
@@ -751,9 +760,9 @@ if(getOutputFormat() == 'html_document') {
 }
 ```
 
-#### d) Probabilidad que el crecimiento anual del PIB en 2020 sea menor a 5%
+#### d) Probabilidad que el crecimiento anual del PIB en 2020 sea menor a -4%
 
-Paso 1: Calcular el nivel para cada simulación y agregarlo a una frecuencia anual
+Paso 1: Calcular el nivel para cada simulación y agregarlo a una frecuencia anual;
 
 ```{r, comment="", warning=F, message=F, echo=F} 
 # Paso 1: Calcular el nivel para cada simulacion y agregarlo a una frecuencia anual
@@ -778,12 +787,12 @@ for (s in 1:NSim){
 }
 ```
 
-Paso 2: Calcular la probabilidad
+Paso 2: Calcular la probabilidad;
 
 ```{r, comment="", warning=F, message=F, echo=F} 
 # Step 2: Calculate the probability
-p2020 = mean(SimFcstGrt["2020-01-01",] <= -5)
-p2021 = mean(SimFcstGrt["2021-01-01",] <= -5)
+p2020 = mean(SimFcstGrt["2020-01-01",] <= -4)
+p2021 = mean(SimFcstGrt["2021-01-01",] <= -4)
 
 # Plot some interval forecasts for annual CPI growth
 ci95 = as.xts(t(apply(SimFcstGrt, 1, quantile, probs = c(0.025, .5, 0.975),  na.rm = TRUE) ))
@@ -815,7 +824,7 @@ if(getOutputFormat() == 'html_document') {
 }
 ```
 
-Los resultados indican que la probabilidad que la tasa de crecimiento anual del PIB sea menor a -5% a finales de 2020 es `r round(p2020*100,1)`% y para 2021 de `r round(p2021*100,1)`%
+Los resultados indican que la probabilidad que la tasa de crecimiento anual del PIB sea menor a -4% a finales de 2020 es `r round(p2020*100,1)`% y para 2021 de `r round(p2021*100,1)`%.
 
 # Anexos
 
